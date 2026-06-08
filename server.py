@@ -12,14 +12,20 @@ Also serves index.html at /.
 """
 
 import os
+import socket
 import threading
 import time
 
 import requests
+import urllib3.util.connection as _urllib3_cn
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
+
+# Railway's default outbound traffic uses IPv6, which OpenSky blocks.
+# Force all outbound connections to use IPv4.
+_urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
 
 load_dotenv()
 
