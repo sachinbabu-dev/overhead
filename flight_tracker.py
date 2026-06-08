@@ -442,7 +442,7 @@ def draw_header(surface, aircraft, last_fetch_t, error_msg, font_title, font_sm,
     airborne = sum(1 for a in aircraft if not a["on_ground"])
     grounded = len(aircraft) - airborne
 
-    title = font_title.render("AIRSPACE", True, ACCENT)
+    title = font_title.render("OVERHEAD", True, ACCENT)
     surface.blit(title, (14, 10))
 
     parts = [f"{airborne} airborne"]

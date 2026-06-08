@@ -33,6 +33,8 @@ RADIUS                = float(os.getenv("RADIUS",         "0.5"))
 OPENSKY_CLIENT_ID     = os.getenv("OPENSKY_CLIENT_ID",    "")
 OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET","")
 POLL_INTERVAL         = int(os.getenv("POLL_INTERVAL",    "15"))
+SAT_POLL_INTERVAL     = int(os.getenv("SAT_POLL_INTERVAL",  "60"))
+SAT_MIN_ELEVATION     = float(os.getenv("SAT_MIN_ELEVATION", "0"))
 
 print(f"[config] LAT={LAT} LON={LON} RADIUS={RADIUS} POLL_INTERVAL={POLL_INTERVAL}")
 print(f"[config] OPENSKY_CLIENT_ID={'SET' if OPENSKY_CLIENT_ID else 'NOT SET'}")
@@ -81,6 +83,11 @@ def get_headers():
 
 _lock  = threading.Lock()
 _cache = {"planes": [], "fetched_at": 0.0, "error": ""}
+
+_sat_lock      = threading.Lock()
+_sat_cache     = {"satellites": [], "fetched_at": 0.0, "error": "", "tle_count": 0}
+_tle_sats: list = []
+_tle_refreshed = 0.0
 
 
 def fetch_loop():
@@ -142,6 +149,97 @@ def fetch_loop():
 
 
 threading.Thread(target=fetch_loop, daemon=True).start()
+
+
+# ==============================================================================
+# SATELLITE TRACKING  (Celestrak TLE + skyfield)
+# ==============================================================================
+
+def _load_tles(ts):
+    global _tle_sats, _tle_refreshed
+    try:
+        from skyfield.api import EarthSatellite
+        resp = requests.get(
+            "https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=tle",
+            timeout=20,
+        )
+        resp.raise_for_status()
+        lines = [l.strip() for l in resp.text.strip().splitlines() if l.strip()]
+        sats = []
+        for i in range(0, len(lines) - 2, 3):
+            try:
+                sats.append(EarthSatellite(lines[i + 1], lines[i + 2], lines[i], ts))
+            except Exception:
+                pass
+        _tle_sats = sats
+        _tle_refreshed = time.time()
+        print(f"[satellites] loaded {len(sats)} TLEs from Celestrak")
+    except Exception as exc:
+        print(f"[satellites] TLE fetch error: {exc}")
+
+
+def sat_fetch_loop():
+    global _tle_sats, _tle_refreshed
+    try:
+        from skyfield.api import load, wgs84
+    except ImportError:
+        print("[satellites] skyfield not installed — satellite tracking disabled")
+        return
+
+    ts       = load.timescale()
+    observer = wgs84.latlon(LAT, LON)
+
+    _load_tles(ts)
+
+    while True:
+        try:
+            if time.time() - _tle_refreshed > 3600:
+                _load_tles(ts)
+
+            if not _tle_sats:
+                time.sleep(60)
+                continue
+
+            t        = ts.now()
+            overhead = []
+
+            for sat in _tle_sats:
+                try:
+                    diff = sat - observer
+                    topo = diff.at(t)
+                    alt, az, dist = topo.altaz()
+
+                    if alt.degrees < SAT_MIN_ELEVATION:
+                        continue
+
+                    sub = sat.at(t).subpoint()
+                    overhead.append({
+                        "name":          sat.name.strip(),
+                        "norad_id":      int(sat.model.satnum),
+                        "lat":           round(sub.latitude.degrees,  4),
+                        "lon":           round(sub.longitude.degrees, 4),
+                        "alt_km":        round(sub.elevation.km,      0),
+                        "elevation_deg": round(alt.degrees,            1),
+                        "azimuth_deg":   round(az.degrees,             1),
+                        "range_km":      round(dist.km,                0),
+                    })
+                except Exception:
+                    pass
+
+            with _sat_lock:
+                _sat_cache["satellites"] = overhead
+                _sat_cache["fetched_at"] = time.time()
+                _sat_cache["error"]      = ""
+                _sat_cache["tle_count"]  = len(_tle_sats)
+
+        except Exception as exc:
+            with _sat_lock:
+                _sat_cache["error"] = str(exc)[:100]
+
+        time.sleep(SAT_POLL_INTERVAL)
+
+
+threading.Thread(target=sat_fetch_loop, daemon=True).start()
 
 # ==============================================================================
 # API
@@ -251,6 +349,17 @@ def api_track(icao: str):
         return JSONResponse({"error": f"HTTP {code}", "path": []})
     except Exception as exc:
         return JSONResponse({"error": str(exc)[:100], "path": []})
+
+
+@app.get("/api/satellites")
+def api_satellites():
+    with _sat_lock:
+        return {
+            "satellites": _sat_cache["satellites"],
+            "fetched_at": _sat_cache["fetched_at"],
+            "error":      _sat_cache["error"],
+            "tle_count":  _sat_cache["tle_count"],
+        }
 
 
 @app.get("/")
