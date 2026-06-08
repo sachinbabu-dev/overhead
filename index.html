@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Airspace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:           #060a14;
+      --ring:         #003750;
+      --ring-label:   #1e5a6e;
+      --accent:       #00d2aa;
+      --panel-bg:     rgba(8, 16, 32, 0.97);
+      --panel-border: #009678;
+      --error:        #ff503c;
+      --dim:          #788597;
+      --font:         'Share Tech Mono', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: #fff;
+      font-family: var(--font);
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── Canvas ─────────────────────────────────────────────────────── */
+    #radar {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      cursor: crosshair;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    #header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 56px;
+      background: linear-gradient(180deg, rgba(6,10,20,.97) 65%, transparent);
+      border-bottom: 1px solid var(--ring);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 18px;
+      z-index: 20;
+      pointer-events: none;
+    }
+    #header-title {
+      font-size: 22px;
+      color: var(--accent);
+      letter-spacing: 4px;
+    }
+    #header-counts { font-size: 12px; color: var(--dim); }
+    #header-status {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--dim);
+    }
+    #header-status.err { color: var(--error); }
+
+    /* ── Detail panel ────────────────────────────────────────────────── */
+    #panel {
+      position: fixed;
+      right: 18px;
+      top: 50%;
+      width: 272px;
+      transform: translateY(-50%) translateX(calc(100% + 32px));
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      backdrop-filter: blur(6px);
+      transition: transform .28s cubic-bezier(.4,0,.2,1);
+      z-index: 20;
+    }
+    #panel.open { transform: translateY(-50%) translateX(0); }
+
+    #panel-strip { height: 4px; }
+
+    .p-body { padding: 14px 16px 10px; }
+
+    #panel-callsign {
+      font-size: 24px;
+      text-align: center;
+      letter-spacing: 3px;
+      margin-bottom: 3px;
+    }
+    #panel-icao {
+      font-size: 11px;
+      color: var(--dim);
+      text-align: center;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    #panel-airline {
+      font-size: 13px;
+      color: var(--accent);
+      text-align: center;
+      letter-spacing: 1px;
+      min-height: 18px;
+      margin-bottom: 8px;
+    }
+    .p-divider {
+      height: 1px;
+      background: var(--panel-border);
+      opacity: .5;
+      margin-bottom: 10px;
+    }
+    .p-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+    .p-row .lbl { color: var(--dim); }
+    .p-row .val { font-size: 13px; }
+
+    #alt-bar-section {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--ring);
+    }
+    .alt-track {
+      height: 5px;
+      background: var(--ring);
+      position: relative;
+      margin-bottom: 5px;
+    }
+    #alt-fill {
+      position: absolute;
+      inset: 0;
+      right: auto;
+      transition: width .8s ease, background .8s ease;
+    }
+    .alt-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--dim);
+    }
+
+    #panel-close {
+      display: block;
+      width: calc(100% - 32px);
+      margin: 10px 16px 14px;
+      padding: 6px;
+      background: transparent;
+      border: 1px solid var(--ring);
+      color: var(--dim);
+      font-family: var(--font);
+      font-size: 11px;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: border-color .18s, color .18s;
+    }
+    #panel-close:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Legend ──────────────────────────────────────────────────────── */
+    #legend {
+      position: fixed;
+      bottom: 38px;
+      right: 16px;
+      font-size: 11px;
+      color: var(--dim);
+      z-index: 20;
+      pointer-events: none;
+    }
+    #legend h4 {
+      font-weight: normal;
+      font-size: 10px;
+      letter-spacing: 1px;
+      margin-bottom: 5px;
+    }
+    .leg-row { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
+    .swatch  { width: 8px; height: 8px; flex-shrink: 0; }
+
+    /* ── Zoom controls ───────────────────────────────────────────────── */
+    #zoom-controls {
+      position: fixed;
+      bottom: 44px;
+      left: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      z-index: 20;
+    }
+    #zoom-controls button {
+      width: 32px;
+      height: 32px;
+      background: rgba(8, 16, 32, 0.92);
+      border: 1px solid var(--ring);
+      color: var(--dim);
+      font-family: var(--font);
+      font-size: 17px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color .18s, color .18s;
+    }
+    #zoom-controls button:hover { border-color: var(--accent); color: var(--accent); }
+    #zoom-reset { font-size: 13px !important; }
+
+    /* ── Coords + hint ────────────────────────────────────────────────── */
+    #coords {
+      position: fixed;
+      bottom: 10px; left: 14px;
+      font-size: 11px;
+      color: var(--ring-label);
+      z-index: 20;
+      pointer-events: none;
+    }
+    #hint {
+      position: fixed;
+      bottom: 10px;
+      left: 50%; transform: translateX(-50%);
+      font-size: 11px;
+      color: var(--ring-label);
+      opacity: 0;
+      transition: opacity .3s;
+      z-index: 20;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    #hint.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<canvas id="radar"></canvas>
+
+<!-- Header -->
+<div id="header">
+  <span id="header-title">AIRSPACE</span>
+  <span id="header-counts">—</span>
+  <span id="header-status">awaiting data…</span>
+</div>
+
+<!-- Detail panel -->
+<div id="panel">
+  <div id="panel-strip"></div>
+  <div class="p-body">
+    <div id="panel-callsign">—</div>
+    <div id="panel-icao">—</div>
+    <div id="panel-airline"></div>
+    <div class="p-divider"></div>
+    <div class="p-row"><span class="lbl">STATUS</span>  <span class="val" id="pv-status">—</span></div>
+    <div class="p-row"><span class="lbl">ALTITUDE</span><span class="val" id="pv-alt">—</span></div>
+    <div class="p-row"><span class="lbl">SPEED</span>   <span class="val" id="pv-speed">—</span></div>
+    <div class="p-row"><span class="lbl">HEADING</span> <span class="val" id="pv-heading">—</span></div>
+    <div class="p-row"><span class="lbl">TRACK</span>   <span class="val" id="pv-track">—</span></div>
+    <div class="p-divider"></div>
+    <div class="p-row"><span class="lbl">FROM</span>    <span class="val" id="pv-origin">—</span></div>
+    <div class="p-row"><span class="lbl">TO</span>      <span class="val" id="pv-dest">—</span></div>
+    <div class="p-divider"></div>
+    <div class="p-row"><span class="lbl">TYPE</span>    <span class="val" id="pv-type">—</span></div>
+    <div class="p-row"><span class="lbl">REG</span>     <span class="val" id="pv-reg">—</span></div>
+    <div class="p-row"><span class="lbl">OPERATOR</span><span class="val" id="pv-operator" style="font-size:11px">—</span></div>
+    <div id="alt-bar-section">
+      <div class="alt-track"><div id="alt-fill"></div></div>
+      <div class="alt-labels"><span>GND</span><span>FL430</span></div>
+    </div>
+  </div>
+  <button id="panel-close">× DESELECT  [SPACE]</button>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <h4>ALTITUDE</h4>
+  <div class="leg-row"><div class="swatch" style="background:#788cff"></div><span>> 11 km  cruise</span></div>
+  <div class="leg-row"><div class="swatch" style="background:#3cd2ff"></div><span>8 – 11 km</span></div>
+  <div class="leg-row"><div class="swatch" style="background:#96ff46"></div><span>4 – 8 km</span></div>
+  <div class="leg-row"><div class="swatch" style="background:#ffaf2d"></div><span>1.5 – 4 km</span></div>
+  <div class="leg-row"><div class="swatch" style="background:#ff503c"></div><span>< 1.5 km  low</span></div>
+  <div class="leg-row"><div class="swatch" style="background:#4b5060"></div><span>ground / no data</span></div>
+</div>
+
+<div id="zoom-controls">
+  <button id="zoom-in"    title="Zoom in  (+)">+</button>
+  <button id="zoom-reset" title="Reset zoom  (0)">⊙</button>
+  <button id="zoom-out"   title="Zoom out  (−)">−</button>
+</div>
+
+<div id="coords"></div>
+<div id="hint">SPACE  deselect  ·  click another flight</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// Colours (kept as [r,g,b] for fast canvas ops)
+// ─────────────────────────────────────────────────────────────────────────────
+const C = {
+  bg:        '#060a14',
+  ring:      [0,  55,  80],
+  ringLbl:   [30, 90, 110],
+  crosshair: [0,  40,  60],
+  accent:    [0, 210, 170],
+  sweep:     [0, 200, 100],
+  grey:      [75,  80,  90],
+  dim:       [120,140,165],
+};
+
+function altRgb(m) {
+  if (m == null)  return C.grey;
+  if (m < 1500)   return [255,  80,  60];
+  if (m < 4000)   return [255, 175,  45];
+  if (m < 8000)   return [150, 255,  70];
+  if (m < 11000)  return [60,  210, 255];
+  return                 [120, 140, 255];
+}
+const altCss = m => `rgb(${altRgb(m).join(',')})`;
+const rgb    = c => `rgb(${c.join(',')})`;
+const rgbf   = (c,f) => `rgb(${c.map(v=>Math.round(v*f)).join(',')})`;
+
+const COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE',
+                 'S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const cpoint  = d => COMPASS[Math.round(d/22.5)%16];
+const toKt    = ms => ms != null ? Math.round(ms*1.944) : null;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Airline lookup  (ICAO 3-letter designator → airline name)
+// ─────────────────────────────────────────────────────────────────────────────
+const AIRLINES = {
+  // UK & Ireland
+  BAW:'British Airways',    EZY:'easyJet',           RYR:'Ryanair',
+  VIR:'Virgin Atlantic',    TOM:'TUI Airways',        EXS:'Jet2',
+  LOG:'Loganair',           BEE:'Flybe',              NJE:'NetJets Europe',
+  TCX:'Thomas Cook',        SHT:'British Airways Shuttle',
+  // Europe
+  DLH:'Lufthansa',          AFR:'Air France',         KLM:'KLM',
+  IBE:'Iberia',             VLG:'Vueling',            AEA:'Air Europa',
+  AZA:'ITA Airways',        SAS:'Scandinavian Airlines', AUA:'Austrian Airlines',
+  SWR:'Swiss Int\'l Air Lines', TAP:'TAP Air Portugal', BEL:'Brussels Airlines',
+  LOT:'LOT Polish Airlines', WZZ:'Wizz Air',          NAX:'Norwegian Air Shuttle',
+  ICE:'Icelandair',         FIN:'Finnair',            EWG:'Eurowings',
+  CFG:'Condor',             GWI:'Germanwings',        CLH:'Lufthansa CityLine',
+  TUI:'TUI fly Deutschland', SXS:'SunExpress',        THY:'Turkish Airlines',
+  PGT:'Pegasus Airlines',   CSA:'Czech Airlines',     BRU:'Brussels Airlines',
+  SVK:'Air Slovakia',       CRX:'Crossair',           AHY:'Azerbaijan Airlines',
+  // Middle East
+  UAE:'Emirates',           ETD:'Etihad Airways',     QTR:'Qatar Airways',
+  SVA:'Saudia',             GFA:'Gulf Air',           FDB:'flydubai',
+  ABY:'Air Arabia',         OMA:'Oman Air',           KAC:'Kuwait Airways',
+  WYT:'flynas',             IAW:'Iraqi Airways',      MEA:'Middle East Airlines',
+  // Africa
+  ETH:'Ethiopian Airlines', KQA:'Kenya Airways',      MSR:'EgyptAir',
+  RAM:'Royal Air Maroc',    SAA:'South African Airways', PZA:'Airlink',
+  EAL:'East African Airlines', HBA:'Air Algérie',
+  // Asia Pacific
+  CCA:'Air China',          CSN:'China Southern',     CES:'China Eastern',
+  CPA:'Cathay Pacific',     HDA:'Cathay Dragon',      SIA:'Singapore Airlines',
+  MAS:'Malaysia Airlines',  THA:'Thai Airways',       PAL:'Philippine Airlines',
+  GIA:'Garuda Indonesia',   AIC:'Air India',          IGO:'IndiGo',
+  SXI:'SpiceJet',           JAL:'Japan Airlines',     ANA:'All Nippon Airways',
+  KAL:'Korean Air',         AAR:'Asiana Airlines',    CAL:'China Airlines',
+  EVA:'EVA Air',            HVN:'Vietnam Airlines',   VJC:'VietJet Air',
+  QFA:'Qantas',             JST:'Jetstar',            ANZ:'Air New Zealand',
+  TGW:'Scoot',              BCT:'Batik Air',          LNI:'Lion Air',
+  // North America
+  AAL:'American Airlines',  UAL:'United Airlines',    DAL:'Delta Air Lines',
+  SWA:'Southwest Airlines', JBU:'JetBlue Airways',    ASA:'Alaska Airlines',
+  SKW:'SkyWest Airlines',   FFT:'Frontier Airlines',  NKS:'Spirit Airlines',
+  HAL:'Hawaiian Airlines',  WJA:'WestJet',            ACA:'Air Canada',
+  // Latin America
+  TAM:'LATAM Brasil',       LAN:'LATAM Airlines',     GLO:'Gol',
+  AZU:'Azul',               AVA:'Avianca',            COA:'Copa Airlines',
+  // Cargo
+  FDX:'FedEx Express',      UPS:'UPS Airlines',       DHL:'DHL Air',
+  NCA:'Nippon Cargo Airlines', MPH:'Martinair Cargo',
+  // Charter / business
+  EJA:'NetJets',            VJT:'VistaJet',           TAG:'TAG Aviation',
+  GAF:'German Air Force',   RFR:'Royal Air Force',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Airport lookup  (ICAO code → display name)
+// ─────────────────────────────────────────────────────────────────────────────
+const AIRPORTS = {
+  // UK & Ireland
+  EGLL:'London Heathrow', EGKK:'London Gatwick', EGGW:'London Luton',
+  EGSS:'London Stansted', EGCC:'Manchester',     EGPF:'Glasgow',
+  EGPH:'Edinburgh',       EGBB:'Birmingham',     EGGD:'Bristol',
+  EGNX:'East Midlands',   EGNT:'Newcastle',      EGPD:'Aberdeen',
+  EGHI:'Southampton',     EGFF:'Cardiff',        EGTE:'Exeter',
+  EGPK:'Prestwick',       EGJJ:'Jersey',         EGJB:'Guernsey',
+  EIDW:'Dublin',          EICK:'Cork',           EINN:'Shannon',
+  // Western Europe
+  EHAM:'Amsterdam Schiphol', LFPG:'Paris CDG',   LFPO:'Paris Orly',
+  EDDF:'Frankfurt',          EDDM:'Munich',      EDDL:'Düsseldorf',
+  EDDB:'Berlin Brandenburg', LEMD:'Madrid Barajas', LEBL:'Barcelona',
+  LIRF:'Rome Fiumicino',     LIML:'Milan Linate', LIME:'Milan Bergamo',
+  LSZH:'Zurich',             LSGG:'Geneva',      LOWW:'Vienna',
+  EBBR:'Brussels',           EIDW:'Dublin',      LPPT:'Lisbon',
+  EKCH:'Copenhagen',         ESSA:'Stockholm Arlanda', EFHK:'Helsinki',
+  ENGM:'Oslo Gardermoen',    LEPA:'Palma de Mallorca',
+  // Eastern Europe
+  EPWA:'Warsaw Chopin',   LKPR:'Prague',         LHBP:'Budapest',
+  LROP:'Bucharest',       UUEE:'Moscow Sheremetyevo', UUDD:'Moscow Domodedovo',
+  EVRA:'Riga',            EYVI:'Vilnius',        EETN:'Tallinn',
+  LDZA:'Zagreb',          LYBE:'Belgrade',       LMML:'Malta',
+  LGAV:'Athens',          LTFM:'Istanbul (New)', LTAI:'Antalya',
+  // Middle East
+  OMDB:'Dubai Intl',      OMDW:'Dubai Al Maktoum', OMAA:'Abu Dhabi',
+  OTHH:'Doha Hamad',      OEJN:'Jeddah',         OERK:'Riyadh',
+  OIII:'Tehran',          OBKH:'Bahrain',        OKBK:'Kuwait City',
+  OOMS:'Muscat',          OLBA:'Beirut',         HECA:'Cairo',
+  // Africa
+  HAAB:'Addis Ababa',     HKJK:'Nairobi',        DNMM:'Lagos',
+  FACT:'Cape Town',       FAJS:'Johannesburg',   GMMN:'Casablanca',
+  DTTA:'Tunis',           HSSS:'Khartoum',
+  // South & East Asia
+  ZBAA:'Beijing Capital', ZSPD:'Shanghai Pudong', ZGGG:'Guangzhou',
+  VHHH:'Hong Kong',       WSSS:'Singapore Changi', WMKK:'Kuala Lumpur',
+  WADD:'Bali Denpasar',   VTBS:'Bangkok Suvarnabhumi', VTBD:'Bangkok Don Mueang',
+  RPLL:'Manila',          RJTT:'Tokyo Haneda',   RJAA:'Tokyo Narita',
+  RKSI:'Seoul Incheon',   RCTP:'Taipei Taoyuan', VVTS:'Ho Chi Minh City',
+  VVNB:'Hanoi',           VNKT:'Kathmandu',      VABB:'Mumbai',
+  VIDP:'Delhi',           VOBL:'Bangalore',      VOMM:'Chennai',
+  VECC:'Kolkata',         OPKC:'Karachi',        OPIS:'Islamabad',
+  VCBI:'Colombo',         VGZR:'Dhaka',
+  // North America
+  KJFK:'New York JFK',    KLAX:'Los Angeles',    KORD:'Chicago O\'Hare',
+  KATL:'Atlanta',         KDFW:'Dallas/Fort Worth', KDEN:'Denver',
+  KSFO:'San Francisco',   KLAS:'Las Vegas',      KSEA:'Seattle-Tacoma',
+  KMIA:'Miami',           KBOS:'Boston',         KEWR:'Newark',
+  KIAH:'Houston',         KPHX:'Phoenix',        KMSP:'Minneapolis',
+  KDTW:'Detroit',         KLGA:'New York LaGuardia', KIAD:'Washington Dulles',
+  KDCA:'Washington National', CYYZ:'Toronto Pearson', CYVR:'Vancouver',
+  CYUL:'Montreal',        CYYC:'Calgary',        MMMX:'Mexico City',
+  // South America
+  SBGR:'São Paulo Guarulhos', SBBR:'Brasília',   SBGL:'Rio de Janeiro',
+  SCEL:'Santiago',        SKBO:'Bogotá',         SPJC:'Lima',
+  SAEZ:'Buenos Aires',
+  // Oceania
+  YSSY:'Sydney',          YMML:'Melbourne',      YBBN:'Brisbane',
+  YPPH:'Perth',           NZAA:'Auckland',       NZWN:'Wellington',
+  NZCH:'Christchurch',
+};
+
+function airportName(code) {
+  if (!code) return null;
+  return AIRPORTS[code.toUpperCase()] ? `${code.toUpperCase()} — ${AIRPORTS[code.toUpperCase()]}` : code.toUpperCase();
+}
+
+function airlineName(callsign) {
+  if (!callsign) return '';
+  // ICAO designators are the leading letters before any digits
+  const prefix = callsign.match(/^[A-Z]+/)?.[0] ?? '';
+  return AIRLINES[prefix.slice(0,3)] ?? AIRLINES[prefix.slice(0,2)] ?? '';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────────────────────
+let planes       = [];
+let history      = {};   // icao → [[lat,lon],…]  max 15
+let firstSeen    = {};   // icao → Date.now() ms
+let selectedIcao = null;
+let trackCache      = {};   // icao → [{lat,lon,alt_m},…]  full trajectory
+let trackLoading    = false;
+let flightInfoCache = {};   // icao → {registration, typecode, model, operator, origin, destination, is_helicopter}
+let sweepAngle    = 0;
+let pulseT        = 0;     // YOU-marker pulse phase 0→3 s
+let compassHeading = null; // degrees from north; null = no sensor / not yet received
+let cLat = 51.5, cLon = -0.1, RADIUS = 0.5;
+let zoomLevel   = 0;          // integer steps; 0 = default view
+let dispRadius  = 0.5;        // display radius in degrees (derived from RADIUS + zoomLevel)
+let lastFetchAt  = 0, fetchErr = '';
+let cx, cy, pxPerDeg;
+
+const ZOOM_FACTOR = 1.35;     // multiply/divide per step
+const ZOOM_MIN    = -4;       // max zoom out  (~8× original area)
+const ZOOM_MAX    = 10;       // max zoom in   (~20× tighter)
+
+function updateZoom() {
+  dispRadius = RADIUS / Math.pow(ZOOM_FACTOR, zoomLevel);
+  pxPerDeg   = Math.min(canvas.width, canvas.height) * 0.44 / dispRadius;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Canvas
+// ─────────────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('radar');
+const ctx    = canvas.getContext('2d');
+
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  cx       = canvas.width  / 2;
+  cy       = canvas.height / 2 + 24;
+  updateZoom();
+}
+window.addEventListener('resize', resize);
+resize();
+
+const geo2s = (lat, lon) => [
+  cx + (lon - cLon) * Math.cos(cLat * Math.PI/180) * pxPerDeg,
+  cy - (lat - cLat) * pxPerDeg,
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Draw — radar background
+// ─────────────────────────────────────────────────────────────────────────────
+function drawRings() {
+  const step  = dispRadius <= 0.6 ? 0.25 : 0.5;
+  const reach = dispRadius * pxPerDeg;
+  ctx.font      = '11px "Share Tech Mono",monospace';
+  ctx.textAlign = 'left';
+  let r = step;
+  while (r <= dispRadius + 0.01) {
+    const rPx = r * pxPerDeg;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rPx, 0, Math.PI*2);
+    ctx.strokeStyle = rgb(C.ring);
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+    ctx.fillStyle = rgb(C.ringLbl);
+    ctx.fillText(`${Math.round(r*111)}km`, cx + rPx + 3, cy + 4);
+    r = Math.round((r + step)*100)/100;
+  }
+  // crosshair
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - reach); ctx.lineTo(cx, cy + reach);
+  ctx.moveTo(cx - reach, cy); ctx.lineTo(cx + reach, cy);
+  ctx.strokeStyle = rgb(C.crosshair);
+  ctx.lineWidth   = 1;
+  ctx.stroke();
+  // compass labels
+  ctx.font      = '12px "Share Tech Mono",monospace';
+  ctx.fillStyle = rgb(C.dim);
+  ctx.textAlign = 'center';
+  const m = reach + 16;
+  for (const [t, dx, dy] of [['N',0,-m],['S',0,m],['E',m,0],['W',-m,0]])
+    ctx.fillText(t, cx+dx, cy+dy+4);
+}
+
+function drawSweep() {
+  const rPx = dispRadius * pxPerDeg;
+  for (let off = 27; off >= 0; off--) {
+    const a = (sweepAngle - off) * Math.PI/180;
+    const i = Math.max(0, 68 - off*2);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.sin(a)*rPx, cy - Math.cos(a)*rPx);
+    ctx.strokeStyle = `rgb(0,${i},${Math.round(i/3)})`;
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+  }
+  const a = sweepAngle * Math.PI/180;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.sin(a)*rPx, cy - Math.cos(a)*rPx);
+  ctx.strokeStyle = rgb(C.sweep);
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+}
+
+function drawYou(pulseR) {
+  if (pulseR > 0) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, pulseR, 0, Math.PI*2);
+    ctx.strokeStyle = rgb(C.accent);
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.arc(cx, cy, 6, 0, Math.PI*2);
+  ctx.strokeStyle = rgb(C.accent);
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2, 0, Math.PI*2);
+  ctx.fillStyle = rgb(C.accent);
+  ctx.fill();
+  ctx.fillStyle  = rgb(C.accent);
+  ctx.font       = '11px "Share Tech Mono",monospace';
+  ctx.textAlign  = 'left';
+  ctx.fillText('YOU', cx+10, cy+4);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Draw — aircraft
+// ─────────────────────────────────────────────────────────────────────────────
+// ── Selection ring (shared) ────────────────────────────────────────────────
+function selRing(px, py, r) {
+  ctx.beginPath();
+  ctx.arc(px, py, r, 0, Math.PI*2);
+  ctx.strokeStyle = rgb(C.accent);
+  ctx.lineWidth   = 1;
+  ctx.stroke();
+}
+
+// ── Airplane icon — realistic top-down silhouette ─────────────────────────
+function drawAirplaneIcon(px, py, track, color, sel) {
+  if (sel) selRing(px, py, 20);
+
+  const s = 1.25;   // scale: 1.0 ≈ 22 px wingspan
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate((track ?? 0) * Math.PI / 180);
+
+  // ── Single continuous path: nose → right wing → right stab → tail →
+  //    left stab → left wing → back to nose ──────────────────────────────
+  ctx.beginPath();
+
+  // Nose
+  ctx.moveTo(0, -11*s);
+
+  // Right side: fuselage down to wing root
+  ctx.bezierCurveTo( 1.6*s, -9*s,  2*s, -5*s,  2*s, -1.5*s);
+
+  // Right wing leading edge (swept ~28°)
+  ctx.lineTo(11.5*s, 3.5*s);
+
+  // Right wingtip round
+  ctx.quadraticCurveTo(12.5*s, 4*s, 11*s, 5.5*s);
+
+  // Right wing trailing edge back to fuselage
+  ctx.lineTo(2.8*s, 3.5*s);
+
+  // Right fuselage: wing root to tail root
+  ctx.lineTo(2*s, 7*s);
+
+  // Right horizontal stabilizer
+  ctx.lineTo(5.8*s, 9.5*s);
+  ctx.quadraticCurveTo(6.2*s, 10*s, 5.5*s, 11*s);
+  ctx.lineTo(2*s, 9.5*s);
+
+  // Tail tip (curved)
+  ctx.quadraticCurveTo( 1*s, 12*s,  0, 12.5*s);
+  ctx.quadraticCurveTo(-1*s, 12*s, -2*s, 9.5*s);
+
+  // Left horizontal stabilizer (mirror)
+  ctx.lineTo(-5.5*s, 11*s);
+  ctx.quadraticCurveTo(-6.2*s, 10*s, -5.8*s, 9.5*s);
+  ctx.lineTo(-2*s, 7*s);
+
+  // Left fuselage: tail root to wing root
+  ctx.lineTo(-2.8*s, 3.5*s);
+
+  // Left wing trailing edge
+  ctx.lineTo(-11*s, 5.5*s);
+
+  // Left wingtip round
+  ctx.quadraticCurveTo(-12.5*s, 4*s, -11.5*s, 3.5*s);
+
+  // Left wing leading edge back to fuselage
+  ctx.lineTo(-2*s, -1.5*s);
+
+  // Left fuselage back up to nose
+  ctx.bezierCurveTo(-2*s, -5*s, -1.6*s, -9*s, 0, -11*s);
+
+  ctx.closePath();
+
+  // Fill with altitude colour + faint dark edge for depth
+  ctx.fillStyle   = rgb(color);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth   = 0.6;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// ── Helicopter icon ────────────────────────────────────────────────────────
+function drawHelicopterIcon(px, py, track, color, sel) {
+  if (sel) selRing(px, py, 18);
+  const rr  = 10;
+  const rad = (track ?? 0) * Math.PI/180;
+
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(rad);
+  ctx.strokeStyle = rgb(color);
+
+  // Main rotor — two long blades at 60° offset
+  ctx.lineWidth = 1.5;
+  for (const offset of [0, Math.PI/2]) {
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(offset)*-rr, Math.sin(offset)*-rr);
+    ctx.lineTo(Math.cos(offset)* rr, Math.sin(offset)* rr);
+    ctx.stroke();
+  }
+
+  // Fuselage body (small filled circle)
+  ctx.beginPath();
+  ctx.arc(0, 0, 3.5, 0, Math.PI*2);
+  ctx.fillStyle = rgb(color);
+  ctx.fill();
+
+  // Tail boom extending backwards
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, 3.5);
+  ctx.lineTo(0, rr * 0.9);
+  ctx.stroke();
+
+  // Tail rotor (tiny perpendicular line at boom tip)
+  ctx.beginPath();
+  ctx.moveTo(-3.5, rr * 0.9);
+  ctx.lineTo( 3.5, rr * 0.9);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// ── Glider icon ────────────────────────────────────────────────────────────
+function drawGliderIcon(px, py, track, color, sel) {
+  if (sel) selRing(px, py, 16);
+  const rad = (track ?? 0) * Math.PI/180;
+
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(rad);
+  ctx.strokeStyle = rgb(color);
+  ctx.lineWidth   = 1;
+
+  // Very long swept wings
+  ctx.beginPath();
+  ctx.moveTo(-13, 1); ctx.lineTo(0, -2); ctx.lineTo(13, 1);
+  ctx.stroke();
+
+  // Slim fuselage
+  ctx.beginPath();
+  ctx.moveTo(0, -9); ctx.lineTo(0, 8);
+  ctx.stroke();
+
+  // Small tail fin
+  ctx.beginPath();
+  ctx.moveTo(-4, 7); ctx.lineTo(4, 7);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// ── Drone / UAV icon ───────────────────────────────────────────────────────
+function drawDroneIcon(px, py, _track, color, sel) {
+  if (sel) selRing(px, py, 16);
+  const arm = 8;
+  ctx.strokeStyle = rgb(color);
+  ctx.lineWidth   = 1.5;
+
+  // 4 diagonal arms
+  for (const a of [45, 135, 225, 315]) {
+    const r = a * Math.PI/180;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + Math.cos(r)*arm, py + Math.sin(r)*arm);
+    ctx.stroke();
+    // Motor dot at each tip
+    ctx.beginPath();
+    ctx.arc(px + Math.cos(r)*arm, py + Math.sin(r)*arm, 2, 0, Math.PI*2);
+    ctx.fillStyle = rgb(color);
+    ctx.fill();
+  }
+
+  // Centre body
+  ctx.beginPath();
+  ctx.arc(px, py, 2.5, 0, Math.PI*2);
+  ctx.fillStyle = rgb(color);
+  ctx.fill();
+}
+
+// ── Balloon / lighter-than-air icon ────────────────────────────────────────
+function drawBalloonIcon(px, py, _track, color, sel) {
+  if (sel) selRing(px, py, 14);
+  ctx.beginPath();
+  ctx.arc(px, py-3, 6, 0, Math.PI*2);
+  ctx.strokeStyle = rgb(color);
+  ctx.lineWidth   = 1.5;
+  ctx.stroke();
+  // Basket lines
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(px-3, py+3); ctx.lineTo(px-2, py+7); ctx.lineTo(px+2, py+7); ctx.lineTo(px+3, py+3);
+  ctx.stroke();
+}
+
+// ── Dispatcher: pick the right icon ───────────────────────────────────────
+function drawIcon(px, py, plane, color, sel) {
+  const meta = flightInfoCache[plane.icao];
+  const cat  = plane.category;
+
+  const isHeli     = cat === 8  || (meta && meta.is_helicopter);
+  const isGlider   = cat === 9;
+  const isDrone    = cat === 14;
+  const isBalloon  = cat === 10;
+
+  if (isHeli)    return drawHelicopterIcon(px, py, plane.track, color, sel);
+  if (isGlider)  return drawGliderIcon(px, py, plane.track, color, sel);
+  if (isDrone)   return drawDroneIcon(px, py, plane.track, color, sel);
+  if (isBalloon) return drawBalloonIcon(px, py, plane.track, color, sel);
+  return drawAirplaneIcon(px, py, plane.track, color, sel);
+}
+
+function drawTrail(positions, color) {
+  if (positions.length < 2) return;
+  const n = positions.length;
+  for (let i = 1; i < n; i++) {
+    const [x1,y1] = geo2s(positions[i-1][0], positions[i-1][1]);
+    const [x2,y2] = geo2s(positions[i][0],   positions[i][1]);
+    ctx.beginPath();
+    ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
+    ctx.strokeStyle = rgbf(color, (i/n)*0.55);
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+  }
+}
+
+function drawFullTrack(path) {
+  if (path.length < 2) return;
+
+  // Draw the path in segments coloured by altitude
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 6]);
+
+  for (let i = 1; i < path.length; i++) {
+    const [x1, y1] = geo2s(path[i-1].lat, path[i-1].lon);
+    const [x2, y2] = geo2s(path[i].lat,   path[i].lon);
+    const color    = altRgb(path[i].alt_m);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.strokeStyle = rgbf(color, 0.35);
+    ctx.stroke();
+  }
+
+  ctx.setLineDash([]);
+
+  // Mark the takeoff point with a small circle
+  const [ox, oy] = geo2s(path[0].lat, path[0].lon);
+  ctx.beginPath();
+  ctx.arc(ox, oy, 4, 0, Math.PI * 2);
+  ctx.strokeStyle = rgbf(C.dim, 0.7);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = rgbf(C.dim, 0.3);
+  ctx.fill();
+
+  ctx.font      = '10px "Share Tech Mono",monospace';
+  ctx.fillStyle = rgbf(C.dim, 0.7);
+  ctx.textAlign = 'left';
+  ctx.fillText('ORIGIN', ox + 7, oy + 4);
+}
+
+function drawPlane(plane, sel) {
+  const [px, py] = geo2s(plane.lat, plane.lon);
+  if (Math.hypot(px-cx, py-cy) > dispRadius*pxPerDeg*1.08) return;
+
+  const color = plane.on_ground ? C.grey : altRgb(plane.alt_m);
+
+  if (!plane.on_ground && history[plane.icao])
+    drawTrail(history[plane.icao], color);
+
+  // entrance pulse
+  const ageS = (Date.now() - (firstSeen[plane.icao] ?? Date.now())) / 1000;
+  if (ageS < 3) {
+    ctx.beginPath();
+    ctx.arc(px, py, Math.round((ageS/3)*30), 0, Math.PI*2);
+    ctx.strokeStyle = rgbf(color, 1 - ageS/3);
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+  }
+
+  drawIcon(px, py, plane, color, sel);
+
+  ctx.fillStyle  = sel ? rgb(C.accent) : rgb(color);
+  ctx.font       = '12px "Share Tech Mono",monospace';
+  ctx.textAlign  = 'left';
+  ctx.fillText(plane.callsign, px+17, py+4);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI updates (DOM)
+// ─────────────────────────────────────────────────────────────────────────────
+function updatePanel(plane) {
+  const panel = document.getElementById('panel');
+  if (!plane) {
+    panel.classList.remove('open');
+    document.getElementById('hint').classList.remove('show');
+    return;
+  }
+  panel.classList.add('open');
+  document.getElementById('hint').classList.add('show');
+
+  const color = plane.on_ground ? '#4b5060' : altCss(plane.alt_m);
+  document.getElementById('panel-strip').style.background   = color;
+  document.getElementById('panel-callsign').textContent     = plane.callsign;
+  document.getElementById('panel-icao').textContent         = plane.icao.toUpperCase();
+  document.getElementById('panel-airline').textContent      = airlineName(plane.callsign);
+
+  const stEl = document.getElementById('pv-status');
+  stEl.textContent = plane.on_ground ? 'ON GROUND' : 'AIRBORNE';
+  stEl.style.color = plane.on_ground ? '#4b5060'   : '#00d2aa';
+
+  const altEl = document.getElementById('pv-alt');
+  if (plane.alt_m != null) {
+    altEl.textContent = `${Math.round(plane.alt_m)}m  ${Math.round(plane.alt_m*3.281)}ft`;
+    altEl.style.color = altCss(plane.alt_m);
+  } else { altEl.textContent = '---'; altEl.style.color = ''; }
+
+  const kt = toKt(plane.speed_ms);
+  document.getElementById('pv-speed').textContent   = kt != null ? `${kt} kt` : '---';
+  document.getElementById('pv-heading').textContent =
+    plane.track != null ? `${Math.round(plane.track)}°  ${cpoint(plane.track)}` : '---';
+
+  // Track status row
+  const trackEl = document.getElementById('pv-track');
+  if (trackEl) {
+    const cached = trackCache[plane.icao];
+    if (cached) {
+      trackEl.textContent = `${cached.length} waypoints`;
+      trackEl.style.color = '#00d2aa';
+    } else if (trackLoading) {
+      trackEl.textContent = 'loading…';
+      trackEl.style.color = '';
+    } else {
+      trackEl.textContent = '—';
+      trackEl.style.color = '';
+    }
+  }
+
+  // Origin / Destination / aircraft metadata (from flightinfo cache)
+  const info = flightInfoCache[plane.icao];
+  const loading = !info;
+  document.getElementById('pv-origin').textContent   = info ? (airportName(info.origin)      || '—') : 'loading…';
+  document.getElementById('pv-dest').textContent     = info ? (airportName(info.destination) || '—') : 'loading…';
+  document.getElementById('pv-type').textContent     = info ? (info.typecode && info.model ? `${info.typecode} — ${info.model}` : info.typecode || info.model || '—') : 'loading…';
+  document.getElementById('pv-reg').textContent      = info ? (info.registration || '—') : '—';
+  document.getElementById('pv-operator').textContent = info ? (info.operator     || '—') : '—';
+
+  const barSec  = document.getElementById('alt-bar-section');
+  const barFill = document.getElementById('alt-fill');
+  if (plane.alt_m != null && !plane.on_ground) {
+    barSec.style.display = '';
+    barFill.style.width      = `${Math.min(1, plane.alt_m/13000)*100}%`;
+    barFill.style.background = altCss(plane.alt_m);
+  } else { barSec.style.display = 'none'; }
+}
+
+function updateHeader() {
+  const air = planes.filter(p => !p.on_ground).length;
+  const gnd = planes.length - air;
+  const parts = [`${air} airborne`];
+  if (gnd) parts.push(`${gnd} on ground`);
+  document.getElementById('header-counts').textContent = parts.join('  ·  ');
+
+  const el = document.getElementById('header-status');
+  if (fetchErr) {
+    el.textContent = `[!] ${fetchErr}`;
+    el.className   = 'err';
+  } else if (lastFetchAt) {
+    const age = Math.round(Date.now()/1000 - lastFetchAt);
+    const ts  = new Date(lastFetchAt*1000).toLocaleTimeString('en-GB');
+    el.textContent = `updated ${ts}  +${age}s`;
+    el.className   = '';
+  } else {
+    el.textContent = 'awaiting data…';
+    el.className   = '';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data fetch
+// ─────────────────────────────────────────────────────────────────────────────
+async function fetchFlightInfo(icao) {
+  if (flightInfoCache[icao]) return;
+  try {
+    const data = await (await fetch(`/api/flightinfo/${icao}`)).json();
+    flightInfoCache[icao] = data;
+    updatePanel(planes.find(p => p.icao === icao) ?? null);
+  } catch { /* optional enrichment — ignore errors */ }
+}
+
+async function fetchTrack(icao) {
+  if (trackCache[icao]) return;   // already loaded
+  trackLoading = true;
+  updatePanel(planes.find(p => p.icao === icao) ?? null);
+  try {
+    const data = await (await fetch(`/api/track/${icao}`)).json();
+    if (data.path && data.path.length > 1) {
+      trackCache[icao] = data.path;
+    }
+  } catch(e) { /* silently ignore — track is optional */ }
+  trackLoading = false;
+  updatePanel(planes.find(p => p.icao === icao) ?? null);
+}
+
+async function fetchFlights() {
+  try {
+    const data = await (await fetch('/api/flights')).json();
+    cLat = data.config.lat;
+    cLon = data.config.lon;
+    RADIUS = data.config.radius;
+    updateZoom();
+
+    const now  = Date.now();
+    const icaos = new Set(data.planes.map(p => p.icao));
+
+    for (const k of Object.keys(history)) if (!icaos.has(k)) delete history[k];
+
+    for (const p of data.planes) {
+      if (!firstSeen[p.icao]) firstSeen[p.icao] = now;
+      if (!history[p.icao])   history[p.icao]   = [];
+      const h   = history[p.icao];
+      const pos = [p.lat, p.lon];
+      if (!h.length || h[h.length-1][0] !== pos[0] || h[h.length-1][1] !== pos[1]) {
+        h.push(pos);
+        if (h.length > 15) h.shift();
+      }
+    }
+
+    planes      = data.planes;
+    lastFetchAt = data.fetched_at;
+    fetchErr    = data.error;
+
+    const { lat, lon, radius } = data.config;
+    document.getElementById('coords').textContent =
+      `${Math.abs(lat).toFixed(4)}${lat>=0?'N':'S'}  ${Math.abs(lon).toFixed(4)}${lon>=0?'E':'W'}  r=${dispRadius.toFixed(2)}°`;
+
+  } catch(e) { fetchErr = e.message; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interaction
+// ─────────────────────────────────────────────────────────────────────────────
+canvas.addEventListener('click', e => {
+  const r  = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  let best = null, bestD = 20;
+  for (const p of planes) {
+    const [px,py] = geo2s(p.lat, p.lon);
+    const d = Math.hypot(mx-px, my-py);
+    if (d < bestD) { best = p.icao; bestD = d; }
+  }
+  selectedIcao = best && best !== selectedIcao ? best : null;
+  updatePanel(planes.find(p => p.icao === selectedIcao) ?? null);
+  if (selectedIcao) { fetchTrack(selectedIcao); fetchFlightInfo(selectedIcao); }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const r  = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  canvas.style.cursor = planes.some(p => {
+    const [px,py] = geo2s(p.lat, p.lon);
+    return Math.hypot(mx-px, my-py) < 14;
+  }) ? 'pointer' : 'crosshair';
+});
+
+const deselect = () => { selectedIcao = null; updatePanel(null); };
+
+function zoom(delta) {
+  zoomLevel = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomLevel + delta));
+  updateZoom();
+}
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  zoom(e.deltaY < 0 ? 1 : -1);
+}, { passive: false });
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'Escape') { e.preventDefault(); deselect(); }
+  if (e.code === 'Equal'  || e.code === 'NumpadAdd')      { zoom(+1); }
+  if (e.code === 'Minus'  || e.code === 'NumpadSubtract') { zoom(-1); }
+  if (e.code === 'Digit0' || e.code === 'Numpad0')        { zoomLevel = 0; updateZoom(); }
+});
+
+document.getElementById('panel-close').addEventListener('click', deselect);
+document.getElementById('zoom-in') .addEventListener('click', () => zoom(+1));
+document.getElementById('zoom-out').addEventListener('click', () => zoom(-1));
+document.getElementById('zoom-reset').addEventListener('click', () => { zoomLevel = 0; updateZoom(); });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compass rose  (drawn on the main canvas, top-right corner)
+// ─────────────────────────────────────────────────────────────────────────────
+function drawCompass(ocx, ocy, r) {
+  const heading = compassHeading ?? 0;
+  const noSensor = compassHeading === null;
+
+  // Outer background circle
+  ctx.beginPath();
+  ctx.arc(ocx, ocy, r, 0, Math.PI * 2);
+  ctx.fillStyle   = 'rgba(6,10,20,0.92)';
+  ctx.fill();
+  ctx.strokeStyle = noSensor ? rgbf(C.ring, 0.5) : rgb(C.accent);
+  ctx.lineWidth   = 1.5;
+  ctx.stroke();
+
+  // ── Rotating inner rose ──────────────────────────────────────────────
+  // Rotate so the rose's N label always aligns with geographic north
+  // relative to the device heading (heading 0 = device top faces north).
+  ctx.save();
+  ctx.translate(ocx, ocy);
+  ctx.rotate(-heading * Math.PI / 180);
+
+  // Tick marks every 10° (minor) and 45° (cardinal/ordinal)
+  for (let a = 0; a < 360; a += 10) {
+    const isCard = a % 90 === 0;
+    const isOrd  = a % 45 === 0 && !isCard;
+    const len    = isCard ? 9 : isOrd ? 6 : 3;
+    const ar     = a * Math.PI / 180;
+    const r1 = r - 3, r2 = r1 - len;
+    ctx.beginPath();
+    ctx.moveTo(Math.sin(ar) * r1, -Math.cos(ar) * r1);
+    ctx.lineTo(Math.sin(ar) * r2, -Math.cos(ar) * r2);
+    ctx.strokeStyle = isCard ? rgb(C.dim) : rgbf(C.dim, 0.35);
+    ctx.lineWidth   = isCard ? 1.5 : 0.75;
+    ctx.stroke();
+  }
+
+  // Cardinal labels — N in red, rest in dim
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  const lr = r - 20;
+  for (const [lbl, deg] of [['N',0],['E',90],['S',180],['W',270]]) {
+    ctx.save();
+    ctx.rotate(deg * Math.PI / 180);
+    ctx.font      = `bold 11px "Share Tech Mono",monospace`;
+    ctx.fillStyle = lbl === 'N' ? '#ff4040' : rgb(C.dim);
+    ctx.fillText(lbl, 0, -lr);
+    ctx.restore();
+  }
+
+  // Needle — red (north) / white (south) diamond
+  ctx.beginPath();
+  ctx.moveTo(0, -(r - 26));   // north tip
+  ctx.lineTo(-5, 0);
+  ctx.lineTo(0,  (r - 26));   // south tip
+  ctx.lineTo( 5, 0);
+  ctx.closePath();
+
+  // Split fill: top half red, bottom half dim
+  const grad = ctx.createLinearGradient(0, -(r - 26), 0, r - 26);
+  grad.addColorStop(0.5, '#ff4040');
+  grad.addColorStop(0.5, rgb(C.dim));
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Centre pivot dot
+  ctx.beginPath();
+  ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+
+  ctx.restore();   // undo rose rotation
+
+  // ── Fixed label below the rose ──────────────────────────────────────
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font         = '10px "Share Tech Mono",monospace';
+
+  if (noSensor) {
+    // No sensor — radar is always north-up, so label it as such
+    ctx.fillStyle = rgbf(C.dim, 0.45);
+    ctx.fillText('NORTH UP', ocx, ocy + r + 6);
+  } else {
+    const hdgText = `${cpoint(heading)}  ${String(Math.round(heading)).padStart(3,'0')}°`;
+    ctx.fillStyle = rgb(C.dim);
+    ctx.fillText(hdgText, ocx, ocy + r + 6);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Render loop
+// ─────────────────────────────────────────────────────────────────────────────
+let last = 0;
+
+function frame(ts) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((ts - last) / 1000, 0.1);
+  last = ts;
+
+  sweepAngle = (sweepAngle + 90*dt) % 360;   // 1 full rotation / 4 s
+  pulseT     = (pulseT + dt) % 3;
+
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  drawRings();
+  drawSweep();
+  drawYou(pulseT < 2.5 ? Math.round((pulseT/3)*22) : 0);
+
+  const sel = planes.find(p => p.icao === selectedIcao);
+
+  // Draw full trajectory under everything else
+  if (sel && trackCache[sel.icao]) drawFullTrack(trackCache[sel.icao]);
+
+  for (const p of planes) if (p.icao !== selectedIcao) drawPlane(p, false);
+  if (sel) drawPlane(sel, true);
+
+  updateHeader();
+
+  // Compass — top right, below header
+  drawCompass(canvas.width - 72, 130, 52);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Boot
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Device orientation  (compass heading)
+// ─────────────────────────────────────────────────────────────────────────────
+function attachOrientationListeners() {
+  // Prefer absolute orientation (Chrome / Android) — gives true magnetic north
+  window.addEventListener('deviceorientationabsolute', e => {
+    if (e.alpha !== null) compassHeading = (360 - e.alpha) % 360;
+  }, true);
+
+  // Standard event — iOS uses webkitCompassHeading; others use alpha
+  window.addEventListener('deviceorientation', e => {
+    if (e.webkitCompassHeading != null) {
+      // iOS: webkitCompassHeading is already "degrees from north, clockwise"
+      compassHeading = e.webkitCompassHeading;
+    } else if (compassHeading === null && e.alpha !== null) {
+      // Fallback: alpha is CCW from north, so invert it
+      compassHeading = (360 - e.alpha) % 360;
+    }
+  }, true);
+}
+
+async function initCompass() {
+  // iOS 13+ requires explicit permission before orientation events fire
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const perm = await DeviceOrientationEvent.requestPermission();
+      if (perm === 'granted') attachOrientationListeners();
+    } catch { /* user denied or failed */ }
+  } else {
+    attachOrientationListeners();
+  }
+}
+
+// Tap the compass area to request sensor permission (iOS 13+) or manually enter heading
+canvas.addEventListener('click', async e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const compassX = canvas.width - 72, compassY = 130;
+  if (Math.hypot(mx - compassX, my - compassY) >= 60) return;
+
+  // Try requesting sensor permission first (iOS 13+)
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const perm = await DeviceOrientationEvent.requestPermission();
+      if (perm === 'granted') { attachOrientationListeners(); return; }
+    } catch { /* denied */ }
+  }
+
+  // No sensor available — let user type a heading manually
+  const raw = prompt('Enter your heading in degrees (0 = North, 90 = East):', '0');
+  if (raw !== null) {
+    const deg = parseFloat(raw);
+    if (!isNaN(deg)) compassHeading = ((deg % 360) + 360) % 360;
+  }
+});
+
+initCompass();
+
+fetchFlights();
+setInterval(fetchFlights, 15_000);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
