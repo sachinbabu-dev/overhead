@@ -46,12 +46,15 @@ print(f"[config] LAT={LAT} LON={LON} RADIUS={RADIUS} POLL_INTERVAL={POLL_INTERVA
 print(f"[config] OPENSKY_CLIENT_ID={'SET' if OPENSKY_CLIENT_ID else 'NOT SET'}")
 print(f"[config] OPENSKY_CLIENT_SECRET={'SET' if OPENSKY_CLIENT_SECRET else 'NOT SET'}")
 
-OPENSKY_URL       = "https://opensky-network.org/api/states/all"
 OPENSKY_TOKEN_URL = ("https://auth.opensky-network.org/auth/realms/"
                      "opensky-network/protocol/openid-connect/token")
 
+# adsb.lol — free community ADS-B API, no auth, works from cloud IPs
+# Radius env var is in degrees; adsb.lol expects nautical miles (1° ≈ 60 nm)
+ADSBEXCHANGE_URL = "https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{dist}"
+
 # ==============================================================================
-# TOKEN MANAGEMENT
+# TOKEN MANAGEMENT  (kept for /api/flightinfo and /api/track which use OpenSky)
 # ==============================================================================
 
 _token        = ""
@@ -97,36 +100,33 @@ _tle_refreshed = 0.0
 
 
 def fetch_loop():
+    dist_nm = max(1, int(RADIUS * 60))  # degrees → nautical miles
+    url = ADSBEXCHANGE_URL.format(lat=LAT, lon=LON, dist=dist_nm)
     while True:
         try:
-            params = {
-                "lamin": LAT - RADIUS, "lamax": LAT + RADIUS,
-                "lomin": LON - RADIUS, "lomax": LON + RADIUS,
-                "extended": 1,   # required to receive s[17] category field
-            }
-            resp = requests.get(
-                OPENSKY_URL, params=params, headers=get_headers(), timeout=10
-            )
+            resp = requests.get(url, timeout=10)
             resp.raise_for_status()
-            states = resp.json().get("states") or []
+            aircraft = resp.json().get("ac") or []
 
             planes = []
-            for s in states:
-                if s[5] is None or s[6] is None:
+            for a in aircraft:
+                if a.get("lat") is None or a.get("lon") is None:
                     continue
-                callsign = (s[1] or "").strip() or s[0] or "????"
+                alt_baro  = a.get("alt_baro")
+                on_ground = alt_baro == "ground"
+                alt_m     = None if (on_ground or alt_baro is None) else alt_baro * 0.3048
+                gs        = a.get("gs")
+                callsign  = (a.get("flight") or "").strip() or a.get("hex") or "????"
                 planes.append({
-                    "icao":      s[0] or "????",
+                    "icao":      (a.get("hex") or "????").upper(),
                     "callsign":  callsign,
-                    "lat":       s[6],
-                    "lon":       s[5],
-                    "alt_m":     s[7],
-                    "on_ground": bool(s[8]),
-                    "speed_ms":  s[9],
-                    "track":     s[10],
-                    # ADS-B emitter category (s[17]): 8=rotorcraft, 9=glider,
-                    # 14=UAV, 10=lighter-than-air — used to select radar icon
-                    "category":  s[17] if len(s) > 17 else None,
+                    "lat":       a["lat"],
+                    "lon":       a["lon"],
+                    "alt_m":     alt_m,
+                    "on_ground": on_ground,
+                    "speed_ms":  gs / 1.944 if gs is not None else None,
+                    "track":     a.get("track"),
+                    "category":  a.get("category"),
                 })
 
             with _lock:
@@ -138,13 +138,6 @@ def fetch_loop():
             with _lock: _cache["error"] = "API timeout — retrying"
         except requests.exceptions.HTTPError as exc:
             code = exc.response.status_code if exc.response else "?"
-            if code == 429:
-                retry_after = int(
-                    exc.response.headers.get("X-Rate-Limit-Retry-After-Seconds", POLL_INTERVAL * 4)
-                )
-                with _lock: _cache["error"] = f"Rate limited — waiting {retry_after}s"
-                time.sleep(retry_after)
-                continue
             with _lock: _cache["error"] = f"HTTP {code}"
         except requests.exceptions.ConnectionError:
             with _lock: _cache["error"] = "No network connection"
