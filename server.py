@@ -34,6 +34,10 @@ OPENSKY_CLIENT_ID     = os.getenv("OPENSKY_CLIENT_ID",    "")
 OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET","")
 POLL_INTERVAL         = int(os.getenv("POLL_INTERVAL",    "15"))
 
+print(f"[config] LAT={LAT} LON={LON} RADIUS={RADIUS} POLL_INTERVAL={POLL_INTERVAL}")
+print(f"[config] OPENSKY_CLIENT_ID={'SET' if OPENSKY_CLIENT_ID else 'NOT SET'}")
+print(f"[config] OPENSKY_CLIENT_SECRET={'SET' if OPENSKY_CLIENT_SECRET else 'NOT SET'}")
+
 OPENSKY_URL       = "https://opensky-network.org/api/states/all"
 OPENSKY_TOKEN_URL = ("https://auth.opensky-network.org/auth/realms/"
                      "opensky-network/protocol/openid-connect/token")
