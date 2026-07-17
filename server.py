@@ -41,10 +41,12 @@ OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET","")
 POLL_INTERVAL         = int(os.getenv("POLL_INTERVAL",    "15"))
 SAT_POLL_INTERVAL     = int(os.getenv("SAT_POLL_INTERVAL",  "60"))
 SAT_MIN_ELEVATION     = float(os.getenv("SAT_MIN_ELEVATION", "0"))
+AVIATIONSTACK_KEY     = os.getenv("AVIATIONSTACK_KEY", "")
 
 print(f"[config] LAT={LAT} LON={LON} RADIUS={RADIUS} POLL_INTERVAL={POLL_INTERVAL}")
 print(f"[config] OPENSKY_CLIENT_ID={'SET' if OPENSKY_CLIENT_ID else 'NOT SET'}")
 print(f"[config] OPENSKY_CLIENT_SECRET={'SET' if OPENSKY_CLIENT_SECRET else 'NOT SET'}")
+print(f"[config] AVIATIONSTACK_KEY={'SET' if AVIATIONSTACK_KEY else 'NOT SET'}")
 
 OPENSKY_TOKEN_URL = ("https://auth.opensky-network.org/auth/realms/"
                      "opensky-network/protocol/openid-connect/token")
@@ -359,6 +361,97 @@ def api_satellites():
             "error":      _sat_cache["error"],
             "tle_count":  _sat_cache["tle_count"],
         }
+
+
+def _airport_info(iata: str) -> dict:
+    """Fetch airport name, city, country from Aviationstack /airports."""
+    if not iata:
+        return {}
+    try:
+        r = requests.get(
+            "https://api.aviationstack.com/v1/airports",
+            params={"access_key": AVIATIONSTACK_KEY, "search": iata},
+            timeout=8,
+        )
+        r.raise_for_status()
+        results = r.json().get("data") or []
+        if results:
+            a = results[0]
+            return {
+                "name":    a.get("airport_name"),
+                "city":    a.get("city"),
+                "country": a.get("country_name"),
+            }
+    except Exception:
+        pass
+    return {}
+
+
+@app.get("/api/flightdetail/{callsign}")
+def api_flightdetail(callsign: str):
+    if not AVIATIONSTACK_KEY:
+        return JSONResponse({"error": "AVIATIONSTACK_KEY not configured"}, status_code=503)
+    try:
+        import concurrent.futures
+
+        resp = requests.get(
+            "https://api.aviationstack.com/v1/flights",
+            params={"access_key": AVIATIONSTACK_KEY, "flight_num": callsign.upper().strip(), "limit": 1},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        flights = resp.json().get("data") or []
+        if not flights:
+            return {"found": False}
+
+        f   = flights[0]
+        dep = f.get("departure") or {}
+        arr = f.get("arrival")   or {}
+        flt = f.get("flight")    or {}
+        ac  = f.get("aircraft")  or {}
+
+        # Fetch both airport details in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            dep_fut = ex.submit(_airport_info, dep.get("iata"))
+            arr_fut = ex.submit(_airport_info, arr.get("iata"))
+            dep_airport = dep_fut.result()
+            arr_airport = arr_fut.result()
+
+        return {
+            "found":       True,
+            "status":      f.get("flight_status"),
+            "delayed":     dep.get("delay"),
+            "flight_iata": flt.get("iata"),
+            "flight_icao": flt.get("icao"),
+            "reg_number":  ac.get("registration"),
+            "model":       ac.get("iata"),
+            "departure": {
+                "iata":      dep.get("iata"),
+                "name":      dep_airport.get("name"),
+                "city":      dep_airport.get("city"),
+                "country":   dep_airport.get("country"),
+                "terminal":  dep.get("terminal"),
+                "gate":      dep.get("gate"),
+                "scheduled": dep.get("scheduled"),
+                "estimated": dep.get("estimated"),
+                "delayed":   dep.get("delay"),
+            },
+            "arrival": {
+                "iata":      arr.get("iata"),
+                "name":      arr_airport.get("name"),
+                "city":      arr_airport.get("city"),
+                "country":   arr_airport.get("country"),
+                "terminal":  arr.get("terminal"),
+                "gate":      arr.get("gate"),
+                "scheduled": arr.get("scheduled"),
+                "estimated": arr.get("estimated"),
+                "delayed":   arr.get("delay"),
+            },
+        }
+    except requests.exceptions.Timeout:
+        return JSONResponse({"error": "Aviationstack timeout"}, status_code=504)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)[:120]}, status_code=500)
 
 
 @app.get("/")
